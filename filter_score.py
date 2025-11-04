@@ -4,12 +4,20 @@ Would be wise to have list of packages that are for sure trustworthy. E.g. Googl
 What should threshold be?
 """
 import os
+import time
+
 import requests
+import logging
+import audit
 
 API_KEY = os.getenv("1db95a5a4e4ed23b6fd71c6ab42ad90d")
 API_URL = "https://libraries.io/api/pypi/{}"
 
 SOURCE_RANK_THRESHOLD = 15  # minimum trust threshold
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
+
 
 def get_source_rank(package_name):
     url = API_URL.format(package_name)
@@ -19,22 +27,26 @@ def get_source_rank(package_name):
         data = response.json()
         return data.get("rank", None)
     else:
-        print(f"Failed to fetch {package_name}: {response.status_code}")
+        logger.warning(f"Failed to fetch {package_name}: {response.status_code}")
         return None
+
 
 def parse_requirements(filename="requirements.txt"):
     with open(filename, "r") as f:
         for line in f:
             if line.strip() and not line.startswith("#"):
-                yield line.strip().split(" ==")[0]  # Only take package name without version
+                yield line, line.strip().split(" ==")[0]  # Only take package name without version
 
-if __name__ == "__main__":
-    print("Checking SourceRank scores...")
-    for pkg in parse_requirements():
-        score = get_source_rank(pkg)
+
+def check_requirements(requirements_file_path="requirements.txt"):
+    logger.info("Checking SourceRank scores...")
+    for pkg_version, pkg_name in parse_requirements(requirements_file_path):
+        score = get_source_rank(pkg_name)
         if score is None:
-            print(f"{pkg}: Not found or error")
+            logger.warning(f"{pkg_name}: Not found or error")
+            audit.download_relevant_wheels_and_unzip(pkg_version)
         elif score < SOURCE_RANK_THRESHOLD:
-            print(f"{pkg}: Low trust (SourceRank {score})")
+            logger.info(f"{pkg_name}: Low trust (SourceRank {score})")
+            audit.download_relevant_wheels_and_unzip(pkg_version)
         else:
-            print(f"{pkg}: OK (SourceRank {score})")
+            logger.info(f"{pkg_name}: OK (SourceRank {score})")

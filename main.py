@@ -2,6 +2,7 @@ import os
 import jsonschema
 import logging
 import json
+import filter_score
 from enum import Enum
 from pydantic import BaseModel, confloat
 from typing import List
@@ -127,11 +128,11 @@ def llm_json_to_findings(llm_json: dict) -> list:
 def main():
     # 1. Environment setup
     # TODO set paths and configs
-
+    filter_score.check_requirements()
     # 2. Read-in files
     # 2.1 Search for file paths of all python or r scripts
     file_paths = []  # TODO? Mehrere Files möglich oder nur jeweils eine analyse-file?
-    initial_path = "testcode"  # <- TODO may be adapted
+    initial_path = "sus_files"  # <- TODO may be adapted
     for root, dirs, files in os.walk(initial_path):
         for filename in files:
             if filename.lower().endswith(".py") or filename.lower().endswith(".r"):
