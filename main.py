@@ -55,11 +55,23 @@ def suffix_to_language(file_path: str) -> str:
 
 
 def built_llm_prompt(metadata: dict, snippet: str) -> str:
-    llm_prompt = "You are a security analysis assistant. Given a sanitized code snippet and metadata, " \
-                 "return a single JSON object with fields: vulnerability_types (list), likelihood (0-1), " \
-                 "confidence ('low'|'medium'|'high'), rationale (1-3 bullets), remediation (1-3 bullets), " \
-                 "snippet_context (one-line). NEVER provide exploit payloads, shell commands to exploit, " \
-                 "or secrets. Only non-actionable, high-level remediation guidance is allowed. " \
+    llm_prompt = "You are a security analysis assistant and try to find possible vulnerabilities." \
+                 "The code you will get is code to analyze data in a federated learning system." \
+                 "The code will only be run in a encapsulated, internet-less environment and should only output results in a privacy preserving manner. " \
+                 "Vulnerabilities you should detect are only such which endanger the data privacy " \
+                 "by revealing patient-specific information to the hub of the federated learning system or by accidental leakage due to debug prints, logs, etc. " \
+                 "Furthermore, you should recognize attempts to break out from the container or to disguise data. "\
+                 "You do not need to flag code which uses patient-specific data to generate an output, if the output does not reveal any patient information"\
+                 "Given one or multiple code files and their metadata, " \
+                 "return a single JSON object with fields: "\
+                 "vulnerability_types (list): list the types of vulnerabilities you recognize, "\
+                 "likelihood (float between 0 and 1): how likely is it, that the problem you found is a risk, "\
+                 "confidence ('low'|'medium'|'high'): how confident are you that the problem is a risk, "\
+                 "rationale (1-3 bullets): explain why the problem could be a risk, "\
+                 "remediation (1-3 bullets): what could be improved to lower the risk, " \
+                 "snippet_context (one-line): what is the user trying to achieve with the code. "\
+                 "NEVER provide exploit payloads, shell commands to exploit, or secrets. "\
+                 "Only non-actionable, high-level remediation guidance is allowed. " \
                  "Output only valid JSON."
 
     data = json.dumps({"metadata": metadata, "snippet": snippet}, ensure_ascii=False)
@@ -128,14 +140,15 @@ def llm_json_to_findings(llm_json: dict) -> list:
 def main():
     # 1. Environment setup
     # TODO set paths and configs
-    filter_score.check_requirements()
+    # filter_score.check_requirements()
+
     # 2. Read-in files
     # 2.1 Search for file paths of all python or r scripts
-    file_paths = []  # TODO? Mehrere Files möglich oder nur jeweils eine analyse-file?
-    initial_path = "sus_files"  # <- TODO may be adapted
+    file_paths = []
+    initial_path = "debug_sus_files"  # <- TODO may be adapted
     for root, dirs, files in os.walk(initial_path):
         for filename in files:
-            if filename.lower().endswith(".py") or filename.lower().endswith(".r"):
+            if suffix_to_language(filename.lower()) != "Invalid":
                 file_paths.append(os.path.join(root, filename))
                 logger.info("File found: %s", file_paths[-1])  # prints appended file_path
             else:
@@ -156,7 +169,7 @@ def main():
 
         response: ChatResponse = chat(model=OLLAMA_CONFIG.get("OLLAMA_MODEL"),
                                       messages=[{
-                                          'role': 'user',
+                                          'role': 'system',
                                           'content': built_llm_prompt(metadata, sanitized_file_content)}],
                                       format=Finding.model_json_schema(),
                                       options={'temperature': OLLAMA_CONFIG.get("OLLAMA_TEMPERATURE")})
