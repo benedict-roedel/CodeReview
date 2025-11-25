@@ -51,10 +51,7 @@ def conda_yml_to_requirements(env_path: Path, out_path: Path) -> None:
                     requirements.append(p)
 
     # Write out
-    out_path.write_text("\n".join(requirements) + "\n")
+    wrapper = out_path.open(mode="a+")
+    wrapper.write("\n" + "\n".join(requirements) + "\n")
     print(f"Wrote {len(requirements)} requirements to {out_path}")
-
-
-
-conda_yml_to_requirements(Path("conda.yaml"), Path("condaRequirements.txt"))
 

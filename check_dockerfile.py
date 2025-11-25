@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 DOCKERHUB_API_BASE = "https://hub.docker.com/v2"
-DOCKERFILE_PATH = "Dockerfile"
+DOCKERFILE_PATH = "analyzeFiles/Dockerfile"
 
 
 def read_dockerfile(dockerfile_path: Path) -> str:

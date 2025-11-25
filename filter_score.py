@@ -102,7 +102,7 @@ def package_in_google_aoss(package_name):
 
     return False
 
-def check_requirements(requirements_file_path="condaRequirements.txt"):
+def check_requirements(requirements_file_path="requirements.txt"):
     logger.info("Checking SourceRank scores...")
     for pkg_version, pkg_name in parse_requirements(requirements_file_path):
         is_conda = pkg_version.lstrip().startswith("*")
