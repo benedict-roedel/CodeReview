@@ -27,12 +27,19 @@ class Finding(BaseModel):
     snippet_context: str
 
 
-class JSONSchema(BaseModel):
+class FileReview(BaseModel):
     file_hash: str
     file_path: str
     language: str
     findings: List[Finding]
     # static_results: StaticResults, # TODO: when implemented bandit and/or semgrep
+    timestamp: str
+
+
+class Review(BaseModel):
+    results: List[FileReview]
+    vulnerability: Level
+    most_vulnerable_files: List[str]
     timestamp: str
 
 
@@ -54,7 +61,7 @@ def suffix_to_language(file_path: str) -> str:
     return valid_languages.get(file_path.split(".")[-1], "Invalid")
 
 
-def built_llm_prompt(metadata: dict, snippet: str) -> str:
+def built_system_prompt() -> dict:
     llm_prompt = "You are a security analysis assistant and try to find possible vulnerabilities." \
                  "The code you will get is code to analyze data in a federated learning system." \
                  "The code will only be run in a encapsulated, internet-less environment and should only output results in a privacy preserving manner. " \
@@ -74,10 +81,13 @@ def built_llm_prompt(metadata: dict, snippet: str) -> str:
                  "Only non-actionable, high-level remediation guidance is allowed. " \
                  "Output only valid JSON."
 
+    return {"role": "system", "content": llm_prompt}
+
+
+def built_user_prompt(metadata, snippet) -> dict:
     data = json.dumps({"metadata": metadata, "snippet": snippet}, ensure_ascii=False)
 
-    full_prompt = "\n".join([llm_prompt, "", "INPUT:", data, "", "Respond only with JSON"])
-    return full_prompt
+    return {"role": "user", "content": data}
 
 
 def parse_llm_to_json(llm_response: str) -> dict:
@@ -155,6 +165,8 @@ def main():
                 logger.warning("Only python and r files are scanned for vulnerabilities: %s is none of these",
                                os.path.join(root, filename))
 
+    llm_messages = [built_system_prompt()]
+
     # 2.2
     # 2.3 load file content and sanitize
     for file_path in file_paths:
@@ -167,35 +179,36 @@ def main():
         language = suffix_to_language(file_path)
         metadata = {"file_path": file_path, "language": language}
 
-        response: ChatResponse = chat(model=OLLAMA_CONFIG.get("OLLAMA_MODEL"),
-                                      messages=[{
-                                          'role': 'system',
-                                          'content': built_llm_prompt(metadata, sanitized_file_content)}],
-                                      format=Finding.model_json_schema(),
-                                      options={'temperature': OLLAMA_CONFIG.get("OLLAMA_TEMPERATURE")})
+        llm_messages.append(built_user_prompt(metadata, sanitized_file_content))
 
-        json_response = parse_llm_to_json(response.message.content)
-        findings = llm_json_to_findings(json_response)
 
-        # 4. Format output to json
-        result = {
-            "file_hash": str(sanitized_file_content.__hash__()),
-            "file_path": file_path,
-            "language": language,
-            "findings": findings,
-            "timestamp": datetime.now().isoformat()
-        }
+    response: ChatResponse = chat(model=OLLAMA_CONFIG.get("OLLAMA_MODEL"),
+                                  messages=llm_messages,
+                                  format=Finding.model_json_schema(),
+                                  options={'temperature': OLLAMA_CONFIG.get("OLLAMA_TEMPERATURE")})
 
-        # validate json schema
-        if jsonschema:
-            try:
-                jsonschema.validate(instance=result, schema=JSONSchema.model_json_schema())
-            except Exception as e:
-                logger.warning("Report validation failed: %s", e)
+    json_response = parse_llm_to_json(response.message.content)
+    findings = llm_json_to_findings(json_response)
 
-        # 5. Output formatted json result
-        print("output json:")
-        print(result)
+    # 4. Format output to json
+    result = {
+        "file_hash": str(sanitized_file_content.__hash__()),
+        "file_path": file_path,
+        "language": language,
+        "findings": findings,
+        "timestamp": datetime.now().isoformat()
+    }
+
+    # validate json schema
+    if jsonschema:
+        try:
+            jsonschema.validate(instance=result, schema=FileReview.model_json_schema())
+        except Exception as e:
+            logger.warning("Report validation failed: %s", e)
+
+    # 5. Output formatted json result
+    print("output json:")
+    print(result)
 
 
 if __name__ == '__main__':
