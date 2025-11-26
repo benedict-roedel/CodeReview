@@ -1,7 +1,11 @@
 import os
+from pathlib import Path
+
 import jsonschema
 import logging
 import json
+
+import check_dockerfile
 import filter_score
 from enum import Enum
 from pydantic import BaseModel, confloat
@@ -10,12 +14,20 @@ from datetime import datetime
 
 from ollama import chat, ChatResponse
 
+import yml_to_text
+
 
 class Level(str, Enum):
     low = "low"
     medium = "medium"
     high = "high"
     unknown = "unknown"
+
+
+class Format(str, Enum):
+    txt = "txt"
+    conda = "conda"
+    both = "both"
 
 
 class Finding(BaseModel):
@@ -47,6 +59,12 @@ class Review(BaseModel):
 class LLMReview(BaseModel):
     results: List[Finding]
     vulnerability: Level
+      
+      
+class DockerfileReview(BaseModel):
+    is_save: bool
+    format_used: Format
+    requirement_files: List[str]
 
 
 OLLAMA_CONFIG = {
@@ -188,7 +206,41 @@ def llm_json_to_review(llm_json: dict, hashes: dict) -> dict:
 def main():
     # 1. Environment setup
     # TODO set paths and configs
-    # filter_score.check_requirements()
+    docker_message = [{"role": "system",
+                       "content": "Check the docker image for vulnerability risks and give the used dependecy list for installation of packages. "
+                                  "Further state if the used dependency list is a txt-based requirements file using pip to install, if conda.yaml file is used or both variants are used. "
+                                  "Return only a valid json string containing 'is_save'=(true|false), 'format_used'=('txt'|'conda'|'both') and 'requirement_files'= List of names of dependcy files"},
+                      {"role": "user", "content": check_dockerfile.dockerfile_to_LLM_input()}]
+
+    docker_response: ChatResponse = chat(model=OLLAMA_CONFIG.get("OLLAMA_MODEL"),
+                                         messages=docker_message,
+                                         format=DockerfileReview.model_json_schema(),
+                                         options={'temperature': OLLAMA_CONFIG.get("OLLAMA_TEMPERATURE")})
+
+    json_docker_response = parse_llm_to_json(docker_response.message.content)
+    try:
+        jsonschema.validate(instance=json_docker_response, schema=DockerfileReview.model_json_schema())
+
+    except jsonschema.exceptions.ValidationError as e:
+        logger.warning("Exception while validating json-string: %s", e)
+
+    if not json_docker_response["is_save"]:
+        logger.critical("Dockerfile seems to be not save!")
+        return
+
+    print(docker_response.message.content)
+
+    if json_docker_response["format_used"] == "conda" or json_docker_response["format_used"] == "both":
+        for file in json_docker_response["requirement_files"]:
+            if file.endswith(".yml") or file.endswith(".yaml"):
+                yml_to_text.conda_yml_to_requirements(Path("analyzeFiles/" + file), Path("analyzeFiles/requirements.txt"))
+
+    if json_docker_response["format_used"] == "txt" or json_docker_response["format_used"] == "both":
+        for file in json_docker_response["requirement_files"]:
+            if file.endswith(".txt") and file != "requirements.txt":
+                Path("analyzeFiles/requirements.txt").open(mode="a").write("\n" + Path("analyzeFiles/" + file).read_text())
+
+    filter_score.check_requirements("analyzeFiles/requirements.txt")
 
     # 2. Read-in files
     # 2.1 Search for file paths of all python or r scripts
